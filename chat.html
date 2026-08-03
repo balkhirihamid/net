@@ -18,11 +18,20 @@
         button:hover { background: #1d4ed8; }
         button.secondary { background: #475569; }
         button.secondary:hover { background: #334155; }
+        button.success { background: #10b981; }
+        button.success:hover { background: #059669; }
         button.danger { background: #dc2626; }
         button.danger:hover { background: #b91c1c; }
         
+        /* نافذة مكالمة واردة Modal */
+        .incoming-call-banner {
+            display: none; background: #0284c7; padding: 15px; border-radius: 12px;
+            align-items: center; justify-content: space-between; animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0% { opacity: 0.9; } 50% { opacity: 1; } 100% { opacity: 0.9; } }
+
         /* منطقة الرسائل */
-        #chatBox { height: 250px; background: #090d16; border-radius: 8px; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+        #chatBox { height: 200px; background: #090d16; border-radius: 8px; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
         .msg { max-width: 75%; padding: 8px 12px; border-radius: 8px; font-size: 14px; word-break: break-word; }
         .msg.me { background: #2563eb; align-self: flex-start; color: white; }
         .msg.other { background: #334155; align-self: flex-end; color: white; }
@@ -33,25 +42,34 @@
         .video-card { position: relative; background: #000; border-radius: 10px; overflow: hidden; height: 220px; border: 1px solid #334155; }
         video { width: 100%; height: 100%; object-fit: cover; }
         .video-label { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-
-        #status { font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div class="app-container">
-    <h2>تطبيق الرسائل والمكالمات (Go Broker)</h2>
+    <h2>تطبيق المحادثات والمكالمات (Go Broker)</h2>
 
     <!-- 1. تسجيل الدخول والاتصال -->
     <div class="card">
         <div class="row">
             <input type="text" id="userIdInput" placeholder="أدخل معرّفك (مثال: USER_1)">
             <button onclick="connectWebSocket()">الاتصال بالسيرفر 🚀</button>
-            <span id="status" style="color: #f59e0b;">غير متصل ❌</span>
+            <span id="status" style="color: #f59e0b; font-weight: bold;">غير متصل ❌</span>
         </div>
     </div>
 
-    <!-- 2. تحديد المستلم والتحكم بالمكالمات -->
+    <!-- 2. شريط المكالمات الواردة (تنبيه بالصوت والقبول/الرفض) -->
+    <div id="incomingCallBanner" class="incoming-call-banner">
+        <div>
+            <span id="incomingCallerText" style="font-size: 18px; font-weight: bold;">📞 مكالمة واردة من...</span>
+        </div>
+        <div class="row">
+            <button onclick="acceptCall()" class="success">قبول ✅</button>
+            <button onclick="rejectCall()" class="danger">رفض ✖</button>
+        </div>
+    </div>
+
+    <!-- 3. تحديد المستلم والتحكم بالمكالمات -->
     <div class="card">
         <div class="row">
             <input type="text" id="targetIdInput" placeholder="معرّف المستلم (مثال: USER_2)">
@@ -61,7 +79,7 @@
         </div>
     </div>
 
-    <!-- 3. شاشات الفيديو والصوت -->
+    <!-- 4. شاشات الفيديو والصوت -->
     <div class="video-grid">
         <div class="video-card">
             <video id="localVideo" autoplay playsinline muted></video>
@@ -73,7 +91,7 @@
         </div>
     </div>
 
-    <!-- 4. المحادثة النصية -->
+    <!-- 5. المحادثة النصية -->
     <div class="card">
         <h4>المحادثة النصية</h4>
         <div id="chatBox"></div>
@@ -89,18 +107,42 @@
     let myId = "";
     let localStream;
     let peerConnection;
-    let isVideoCall = true;
+    let pendingOfferData = null; // الاحتفاظ ببيانات المكالمة لحين القبول
+    let ringtoneAudio = null;
 
-    // رابط سيرفر Go المباشر على Render
     const SERVER_URL = "wss://go-broker.onrender.com/ws";
-
-    // سيرفرات STUN المجانية من Google
     const iceServers = {
         iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' }
         ]
     };
+
+    // إنشاء صوت جرس التنبيه تنبيه برمجياً (سلس وبدون ملفات خارجية)
+    function playRingtone() {
+        stopRingtone();
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        let osc = ctx.createOscillator();
+        let gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, ctx.currentTime); // نغمة 440Hz
+        gain.gain.setValueAtTime(0.1, ctx.currentTime);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        
+        ringtoneAudio = { ctx, osc };
+    }
+
+    function stopRingtone() {
+        if (ringtoneAudio) {
+            try {
+                ringtoneAudio.osc.stop();
+                ringtoneAudio.ctx.close();
+            } catch(e) {}
+            ringtoneAudio = null;
+        }
+    }
 
     function appendMessage(text, type) {
         const chatBox = document.getElementById('chatBox');
@@ -111,13 +153,9 @@
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // 1. الاتصال بالسيرفر
     function connectWebSocket() {
         myId = document.getElementById('userIdInput').value.trim();
-        if (!myId) {
-            alert('يرجى أدخل معرّفك أولاً');
-            return;
-        }
+        if (!myId) return alert('يرجى أدخل معرّفك أولاً');
 
         ws = new WebSocket(`${SERVER_URL}?userId=${myId}`);
 
@@ -135,7 +173,7 @@
                     appendMessage(`${data.sender}: ${data.payload.text}`, 'other');
                     break;
                 case 'offer':
-                    handleOffer(data.sender, data.payload);
+                    handleIncomingOffer(data.sender, data.payload);
                     break;
                 case 'answer':
                     handleAnswer(data.payload);
@@ -143,39 +181,32 @@
                 case 'ice_candidate':
                     handleIceCandidate(data.payload);
                     break;
+                case 'reject':
+                    stopRingtone();
+                    appendMessage(`${data.sender} قام بفض المكالمة ❌`, 'system');
+                    endCall();
+                    break;
             }
         };
 
         ws.onclose = () => {
             document.getElementById('status').innerText = 'انقطع الاتصال ❌';
             document.getElementById('status').style.color = '#ef4444';
-            appendMessage('تم إغلاق الاتصال بالسيرفر', 'system');
         };
     }
 
-    // 2. إرسال رسالة نصية
     function sendTextMessage() {
         const targetId = document.getElementById('targetIdInput').value.trim();
         const input = document.getElementById('messageInput');
         const text = input.value.trim();
 
-        if (!targetId || !text) {
-            alert('تأكد من إدخال معرّف المستلم ونص الرسالة');
-            return;
-        }
+        if (!targetId || !text) return alert('أدخل معرّف المستلم ونص الرسالة');
 
-        const msg = {
-            type: 'text',
-            target: targetId,
-            payload: { text: text }
-        };
-
-        ws.send(JSON.stringify(msg));
+        ws.send(JSON.stringify({ type: 'text', target: targetId, payload: { text } }));
         appendMessage(`أنت: ${text}`, 'me');
         input.value = '';
     }
 
-    // 3. تجهيز الكاميرا / الميكروفون
     async function setupMedia(enableVideo) {
         try {
             localStream = await navigator.mediaDevices.getUserMedia({
@@ -188,33 +219,67 @@
         }
     }
 
-    // 4. بدء المكالمة (صوت أو فيديو)
+    // 1. المتصل يرسل Offer
     async function startCall(video) {
         const targetId = document.getElementById('targetIdInput').value.trim();
-        if (!targetId) {
-            alert('أدخل معرّف الشخص الذي تريد الاتصال به');
-            return;
-        }
+        if (!targetId) return alert('أدخل معرّف الشخص الذي تريد الاتصال به');
 
-        isVideoCall = video;
-        await setupMedia(isVideoCall);
+        await setupMedia(video);
         createPeerConnection(targetId);
 
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
 
-        appendMessage(`جاري الاتصال بـ ${targetId} (${video ? 'فيديو' : 'صوت'})...`, 'system');
+        appendMessage(`جاري الاتصال بـ ${targetId}... 📞`, 'system');
         sendSignal('offer', targetId, { sdp: offer.sdp, type: offer.type, isVideo: video });
     }
 
-    // 5. إنشاء اتصال WebRTC P2P
+    // 2. المستلم يستقبل التنبيه والصوت
+    function handleIncomingOffer(senderId, payload) {
+        pendingOfferData = { senderId, payload };
+        document.getElementById('targetIdInput').value = senderId;
+        
+        // إظهار الشريط وتشغيل الجرس
+        document.getElementById('incomingCallerText').innerText = `📞 مكالمة ${payload.isVideo ? 'فيديو' : 'صوتية'} من: ${senderId}`;
+        document.getElementById('incomingCallBanner').style.display = 'flex';
+        playRingtone();
+    }
+
+    // 3. المستلم يوافق على المكالمة
+    async function acceptCall() {
+        stopRingtone();
+        document.getElementById('incomingCallBanner').style.display = 'none';
+
+        if (!pendingOfferData) return;
+
+        const { senderId, payload } = pendingOfferData;
+        await setupMedia(payload.isVideo ?? true);
+        createPeerConnection(senderId);
+
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        appendMessage(`تمت الموافقة على المكالمة مع ${senderId}`, 'system');
+        sendSignal('answer', senderId, { sdp: answer.sdp, type: answer.type });
+        pendingOfferData = null;
+    }
+
+    // 4. المستلم يرفض المكالمة
+    function rejectCall() {
+        stopRingtone();
+        document.getElementById('incomingCallBanner').style.display = 'none';
+        if (pendingOfferData) {
+            sendSignal('reject', pendingOfferData.senderId, {});
+            pendingOfferData = null;
+        }
+    }
+
     function createPeerConnection(targetId) {
         peerConnection = new RTCPeerConnection(iceServers);
 
         if (localStream) {
-            localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-            });
+            localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
         }
 
         peerConnection.ontrack = (event) => {
@@ -228,29 +293,13 @@
         };
     }
 
-    // 6. التعامل مع إشارات المكالمات الواردة
-    async function handleOffer(senderId, payload) {
-        document.getElementById('targetIdInput').value = senderId;
-        isVideoCall = payload.isVideo ?? true;
-
-        await setupMedia(isVideoCall);
-        createPeerConnection(senderId);
-
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-
-        appendMessage(`مكالمة واردة من ${senderId}... تم الرد تلقائياً`, 'system');
-        sendSignal('answer', senderId, { sdp: answer.sdp, type: answer.type });
-    }
-
     async function handleAnswer(payload) {
-        appendMessage('تم بدء المكالمة بنجاح!', 'system');
+        appendMessage('تم الربط وتأكيد المكالمة! 🎉', 'system');
         await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
     }
 
     async function handleIceCandidate(payload) {
-        if (peerConnection) {
+        if (peerConnection && peerConnection.remoteDescription) {
             await peerConnection.addIceCandidate(new RTCIceCandidate(payload));
         }
     }
@@ -261,8 +310,8 @@
         }
     }
 
-    // 7. إنهاء المكالمة
     function endCall() {
+        stopRingtone();
         if (peerConnection) {
             peerConnection.close();
             peerConnection = null;
@@ -272,6 +321,7 @@
         }
         document.getElementById('localVideo').srcObject = null;
         document.getElementById('remoteVideo').srcObject = null;
+        document.getElementById('incomingCallBanner').style.display = 'none';
         appendMessage('تم إنهاء المكالمة', 'system');
     }
 </script>
