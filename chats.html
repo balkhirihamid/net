@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <title>دردشة ومكالمات WebRTC</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Cairo', 'system-ui', 'sans-serif'],
+          },
+          colors: {
+            ink: {
+              950: '#060912',
+              900: '#0b1020',
+              850: '#101729',
+              800: '#161f33',
+              700: '#1f2a44',
+              600: '#2a3656',
+              500: '#3a466b',
+            },
+            brand: {
+              400: '#60a5fa',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            },
+          },
+          boxShadow: {
+            'glow': '0 0 30px rgba(59, 130, 246, 0.35)',
+            'glow-green': '0 0 40px rgba(34, 197, 94, 0.45)',
+            'glow-red': '0 0 40px rgba(239, 68, 68, 0.45)',
+          },
+          animation: {
+            'ping-slow': 'ping 2s cubic-bezier(0,0,0.2,1) infinite',
+            'float': 'float 3s ease-in-out infinite',
+            'slide-up': 'slideUp 0.35s ease-out',
+            'slide-in': 'slideIn 0.3s ease-out',
+            'fade-in': 'fadeIn 0.25s ease-out',
+          },
+          keyframes: {
+            float: {
+              '0%, 100%': { transform: 'translateY(0)' },
+              '50%': { transform: 'translateY(-8px)' },
+            },
+            slideUp: {
+              from: { transform: 'translateY(20px)', opacity: 0 },
+              to: { transform: 'translateY(0)', opacity: 1 },
+            },
+            slideIn: {
+              from: { transform: 'translateX(120%)', opacity: 0 },
+              to: { transform: 'translateX(0)', opacity: 1 },
+            },
+            fadeIn: {
+              from: { opacity: 0 },
+              to: { opacity: 1 },
+            },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Fonts & Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <style>
+    html, body { font-family: 'Cairo', system-ui, -apple-system, sans-serif; }
+
+    /* iOS safe areas */
+    body { padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom); }
+
+    /* Scrollbar */
+    .nice-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+    .nice-scroll::-webkit-scrollbar-track { background: transparent; }
+    .nice-scroll::-webkit-scrollbar-thumb { background: #2a3656; border-radius: 4px; }
+    .nice-scroll::-webkit-scrollbar-thumb:hover { background: #3a466b; }
+
+    /* Incoming-call ring (phone icon) */
+    @keyframes ring {
+      0%, 50%, 100% { transform: rotate(0); }
+      10%, 30% { transform: rotate(-18deg); }
+      20%, 40% { transform: rotate(18deg); }
+    }
+    .ringing { animation: ring 1.6s ease-in-out infinite; transform-origin: top center; }
+
+    /* Glow ring pulse for incoming call button */
+    @keyframes glowPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.55); }
+      50%      { box-shadow: 0 0 0 18px rgba(34, 197, 94, 0); }
+    }
+    .glow-pulse-green { animation: glowPulse 1.6s ease-in-out infinite; }
+    @keyframes glowPulseRed {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.55); }
+      50%      { box-shadow: 0 0 0 18px rgba(239, 68, 68, 0); }
+    }
+    .glow-pulse-red { animation: glowPulseRed 1.6s ease-in-out infinite; }
+
+    /* Calling dots */
+    @keyframes dotPulse {
+      0%, 80%, 100% { transform: scale(0.4); opacity: 0.5; }
+      40%           { transform: scale(1);   opacity: 1; }
+    }
+    .calling-dots > span {
+      display: inline-block;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #94a3b8;
+      margin: 0 3px;
+      animation: dotPulse 1.4s infinite ease-in-out both;
+    }
+    .calling-dots > span:nth-child(1) { animation-delay: -0.32s; }
+    .calling-dots > span:nth-child(2) { animation-delay: -0.16s; }
+
+    /* Video element */
+    video { background: #000; }
+    video::-webkit-media-controls { display: none !important; }
+
+    /* Mirror local video (front camera) */
+    .mirror { transform: scaleX(-1); }
+
+    /* Signal bars */
+    .signal { display: inline-flex; align-items: flex-end; gap: 3px; height: 14px; }
+    .signal > i { display: block; width: 3px; background: #10b981; border-radius: 1px; }
+    .signal > i:nth-child(1) { height: 25%; }
+    .signal > i:nth-child(2) { height: 50%; }
+    .signal > i:nth-child(3) { height: 75%; }
+    .signal > i:nth-child(4) { height: 100%; }
+    .signal.med > i:nth-child(4) { background: #f59e0b; }
+    .signal.bad > i:nth-child(3), .signal.bad > i:nth-child(4) { background: #ef4444; }
+
+    /* Avatar gradient */
+    .avatar-grad-1 { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+    .avatar-grad-2 { background: linear-gradient(135deg, #ec4899, #f43f5e); }
+    .avatar-grad-3 { background: linear-gradient(135deg, #10b981, #14b8a6); }
+    .avatar-grad-4 { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+    .avatar-grad-5 { background: linear-gradient(135deg, #3b82f6, #06b6d4); }
+    .avatar-grad-6 { background: linear-gradient(135deg, #8b5cf6, #ec4899); }
+
+    /* Active-pill tab */
+    .tab-btn.active { background: rgba(59,130,246,0.15); color: #93c5fd; }
+
+    /* Hide scrollbar utility */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+
+<body class="min-h-screen bg-ink-950 text-slate-100 antialiased selection:bg-brand-600/40">
+
+  <!-- ============================ TOASTS ============================ -->
+  <div id="toastRoot" class="fixed top-4 left-4 right-4 sm:left-auto sm:right-4 sm:max-w-sm z-[200] flex flex-col gap-2 pointer-events-none"></div>
+
+  <!-- ============================ HEADER ============================ -->
+  <header class="sticky top-0 z-30 bg-ink-900/85 backdrop-blur-md border-b border-ink-700/60">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-indigo-600 flex items-center justify-center shadow-glow shrink-0">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>
+      </div>
+      <div class="min-w-0">
+        <h1 class="text-base sm:text-lg font-extrabold leading-tight truncate">دردشة ومكالمات WebRTC</h1>
+        <p class="text-xs text-slate-400 leading-tight">محادثة فورية • مكالمات صوتية ومرئية</p>
+      </div>
+
+      <div class="ms-auto flex items-center gap-2">
+        <div id="statusPill" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 text-red-400 text-xs font-semibold border border-red-500/20">
+          <span class="w-2 h-2 rounded-full bg-red-500"></span>
+          <span id="statusText">غير متصل</span>
+        </div>
+        <div id="userChip" class="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-ink-800 border border-ink-700 text-xs">
+          <div id="myAvatar" class="w-5 h-5 rounded-full avatar-grad-1 text-[10px] font-bold flex items-center justify-center text-white">?</div>
+          <span id="myIdLabel" class="text-slate-200 font-semibold"></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============================ MAIN ============================ -->
+  <main class="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4">
+
+    <!-- ====================== LOGIN CARD ====================== -->
+    <section id="loginCard" class="rounded-2xl border border-ink-700/60 bg-ink-850/80 p-5 sm:p-6 shadow-xl">
+      <div class="flex items-start gap-4">
+        <div class="w-12 h-12 rounded-xl bg-ink-800 border border-ink-700 flex items-center justify-center shrink-0">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-brand-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        </div>
+        <div class="flex-1 min-w-0">
+          <h2 class="text-lg font-bold">ابدأ المحادثة</h2>
+          <p class="text-sm text-slate-400">أدخل معرّفك للاتصال بالسيرفر وبدء المحادثات والمكالمات.</p>
+        </div>
+      </div>
+
+      <div class="mt-5 grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-3">
+        <div class="relative">
+          <span class="absolute inset-y-0 right-3 flex items-center text-slate-500">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </span>
+          <input id="userIdInput" type="text" inputmode="text" autocomplete="off"
+            class="w-full bg-ink-900 border border-ink-700 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 outline-none rounded-xl py-3 pr-10 pl-4 text-sm transition placeholder:text-slate-500"
+            placeholder="معرّفك (مثال: USER_1)">
+        </div>
+        <button id="connectBtn" onclick="connectWebSocket()"
+          class="px-5 py-3 rounded-xl bg-brand-600 hover:bg-brand-700 active:scale-[0.98] text-white font-bold text-sm flex items-center justify-center gap-2 transition">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          <span>اتصال بالسيرفر</span>
+        </button>
+      </div>
+
+      <div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
+        <span id="statusPillMobile" class="sm:hidden inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 text-red-400 font-semibold border border-red-500/20">
+          <span class="w-2 h-2 rounded-full bg-red-500"></span> غير متصل
+        </span>
+        <span class="text-slate-500">حالة الاتصال:</span>
+        <span id="loginHint" class="text-slate-300">أدخل المعرّف للاتصال</span>
+      </div>
+    </section>
+
+    <!-- ====================== APP CARD (after login) ====================== -->
+    <section id="appCard" class="hidden grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4">
+
+      <!-- ======= SIDEBAR ======= -->
+      <aside class="rounded-2xl border border-ink-700/60 bg-ink-850/80 p-4 space-y-4 lg:sticky lg:top-20 self-start">
+        <div>
+          <h3 class="text-sm font-bold text-slate-300 mb-2">المستلم</h3>
+          <div class="relative">
+            <span class="absolute inset-y-0 right-3 flex items-center text-slate-500">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            </span>
+            <input id="targetIdInput" type="text" autocomplete="off"
+              class="w-full bg-ink-900 border border-ink-700 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 outline-none rounded-xl py-2.5 pr-10 pl-3 text-sm transition placeholder:text-slate-500"
+              placeholder="USER_2">
+          </div>
+        </div>
+
+        <div>
+          <h3 class="text-sm font-bold text-slate-300 mb-2">بدء مكالمة</h3>
+          <div class="grid grid-cols-2 gap-2">
+            <button onclick="startCall(false)"
+              class="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white font-semibold text-sm transition shadow-glow-green/40">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>
+              صوتية
+            </button>
+            <button onclick="startCall(true)"
+              class="flex items-center justify-center gap-2 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 active:scale-[0.98] text-white font-semibold text-sm transition shadow-glow">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+              فيديو
+            </button>
+          </div>
+          <button onclick="endCall()" class="mt-2 w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-semibold text-sm transition">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z" transform="rotate(135 12 12)"/></svg>
+            إنهاء المكالمة
+          </button>
+        </div>
+
+        <div class="rounded-xl bg-ink-900/70 border border-ink-700/60 p-3">
+          <h3 class="text-xs font-bold text-slate-400 mb-2">حالة WebRTC</h3>
+          <div class="space-y-1.5 text-xs">
+            <div class="flex items-center justify-between"><span class="text-slate-400">ICE</span><span id="iceState" class="text-slate-200">—</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-400">الاتصال</span><span id="pcState" class="text-slate-200">—</span></div>
+            <div class="flex items-center justify-between"><span class="text-slate-400">الجودة</span><span id="qualityBox" class="signal"><i></i><i></i><i></i><i></i></span></div>
+          </div>
+        </div>
+
+        <button onclick="disconnectWebSocket()"
+          class="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-ink-800 hover:bg-ink-700 border border-ink-700 text-slate-300 font-semibold text-xs transition">
+          قطع الاتصال
+        </button>
+      </aside>
+
+      <!-- ======= MAIN PANEL ======= -->
+      <div class="space-y-4 min-w-0">
+
+        <!-- Tabs -->
+        <div class="rounded-2xl border border-ink-700/60 bg-ink-850/80 p-2 flex gap-1">
+          <button data-tab="video" class="tab-btn active flex-1 px-3 py-2 rounded-xl text-sm font-semibold flex items-center justify-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+            الفيديو
+          </button>
+          <button data-tab="chat" class="tab-btn flex-1 px-3 py-2 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 text-slate-300 hover:bg-ink-800">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            المحادثة
+          </button>
+        </div>
+
+        <!-- Video Panel -->
+        <div data-panel="video" class="rounded-2xl border border-ink-700/60 bg-ink-850/80 p-4">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-bold text-slate-300">الفيديو</h3>
+            <div class="flex items-center gap-2">
+              <button id="swapCamBtn" onclick="swapCamera()" title="تبديل الكاميرا"
+                class="hidden sm:inline-flex w-9 h-9 rounded-lg bg-ink-800 hover:bg-ink-700 border border-ink-700 items-center justify-center text-slate-300 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/><path d="m21 12-7-7v4H11"/><path d="m21 12-7 7v-4h-3"/></svg>
+              </button>
+              <button id="pipBtn" onclick="togglePip()" title="صورة داخل صورة"
+                class="hidden w-9 h-9 rounded-lg bg-ink-800 hover:bg-ink-700 border border-ink-700 items-center justify-center text-slate-300 transition">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><rect width="8" height="6" x="12" y="13" rx="1"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="relative rounded-xl overflow-hidden bg-black border border-ink-700 aspect-video">
+              <video id="localVideo" autoplay playsinline muted class="w-full h-full object-cover mirror"></video>
+              <div class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur text-[11px] font-semibold flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                أنت
+              </div>
+              <div id="localMutedBadge" class="absolute top-2 left-2 hidden px-2 py-1 rounded-md bg-rose-500/90 text-[11px] font-bold flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V4a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+                كتم
+              </div>
+              <div id="localVideoOffBadge" class="absolute top-2 right-2 hidden px-2 py-1 rounded-md bg-ink-900/80 text-[11px] font-bold flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.66 5H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><path d="M16 16a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4h2"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                الكاميرا مغلقة
+              </div>
+            </div>
+
+            <div class="relative rounded-xl overflow-hidden bg-black border border-ink-700 aspect-video">
+              <video id="remoteVideo" autoplay playsinline class="w-full h-full object-cover"></video>
+              <div id="remotePlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-center p-4">
+                <div class="w-16 h-16 rounded-full bg-ink-800 border border-ink-700 flex items-center justify-center mb-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </div>
+                <p class="text-sm font-semibold">في انتظار الطرف الآخر…</p>
+                <p class="text-xs text-slate-600 mt-1">سيظهر الفيديو هنا عند بدء المكالمة</p>
+              </div>
+              <div class="absolute bottom-2 right-2 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur text-[11px] font-semibold flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-amber-400" id="remoteIndicator"></span>
+                <span id="remoteLabel">الطرف الآخر</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Panel -->
+        <div data-panel="chat" class="hidden rounded-2xl border border-ink-700/60 bg-ink-850/80 p-4">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-bold text-slate-300">المحادثة</h3>
+            <span id="chatTarget" class="text-xs text-slate-500">—</span>
+          </div>
+          <div id="chatBox" class="nice-scroll h-72 sm:h-80 bg-ink-950/70 border border-ink-700/60 rounded-xl p-3 flex flex-col gap-2 overflow-y-auto"></div>
+          <div class="mt-3 flex items-center gap-2">
+            <input id="messageInput" type="text" autocomplete="off"
+              class="flex-1 bg-ink-900 border border-ink-700 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 outline-none rounded-xl py-2.5 px-3 text-sm transition placeholder:text-slate-500"
+              placeholder="اكتب رسالة..." onkeydown="if(event.key==='Enter') sendTextMessage()">
+            <button onclick="sendTextMessage()"
+              class="px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 active:scale-[0.98] text-white font-bold text-sm flex items-center gap-2 transition">
+              <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>
+              إرسال
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ============================ INCOMING CALL MODAL ============================ -->
+  <div id="incomingCallModal" class="hidden fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+    <div class="w-full max-w-sm rounded-3xl bg-gradient-to-b from-ink-850 to-ink-900 border border-ink-700 shadow-2xl p-6 text-center animate-slide-up">
+      <div class="flex justify-center mb-2">
+        <div class="w-16 h-16 rounded-full bg-brand-500/10 border border-brand-500/30 flex items-center justify-center text-brand-400 ringing">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>
+        </div>
+      </div>
+      <p class="text-xs uppercase tracking-widest text-slate-500 font-bold">مكالمة واردة</p>
+      <h2 id="incomingCallerName" class="text-2xl font-extrabold mt-1 break-all">—</h2>
+      <p id="incomingCallType" class="text-sm text-slate-400 mt-1">مكالمة صوتية</p>
+      <div class="mt-6 flex items-center justify-center gap-6">
+        <button onclick="rejectCall()" aria-label="رفض"
+          class="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center glow-pulse-red transition active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z" transform="rotate(135 12 12)"/></svg>
+        </button>
+        <button onclick="acceptCall()" aria-label="قبول"
+          class="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 text-white flex items-center justify-center glow-pulse-green transition active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z"/></svg>
+        </button>
+      </div>
+      <p class="mt-5 text-[11px] text-slate-500">اضغط على الأزرار للرد</p>
+    </div>
+  </div>
+
+  <!-- ============================ ACTIVE CALL OVERLAY ============================ -->
+  <div id="callOverlay" class="hidden fixed inset-0 z-[90] bg-ink-950 flex flex-col animate-fade-in">
+
+    <!-- Remote stage -->
+    <div class="relative flex-1 min-h-0 bg-black">
+      <video id="remoteVideoBig" autoplay playsinline class="w-full h-full object-cover"></video>
+
+      <!-- Remote info / state -->
+      <div id="remoteStageOverlay" class="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
+        <div id="remoteAvatarBig" class="w-28 h-28 rounded-full avatar-grad-2 text-3xl font-extrabold flex items-center justify-center text-white mb-4 shadow-xl">?</div>
+        <h2 id="remoteNameBig" class="text-2xl font-extrabold">—</h2>
+        <p id="callStateLabel" class="mt-2 text-slate-300 text-sm flex items-center gap-2">
+          <span class="calling-dots"><span></span><span></span><span></span></span>
+          جاري الاتصال…
+        </p>
+        <p id="callTimerLabel" class="mt-1 text-slate-400 text-xs hidden">00:00</p>
+      </div>
+
+      <!-- Top bar -->
+      <div class="absolute top-0 inset-x-0 p-3 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent">
+        <div class="flex items-center gap-2">
+          <span class="signal" id="overlayQuality"><i></i><i></i><i></i><i></i></span>
+          <span class="text-[11px] text-slate-200 font-semibold">مشفّر P2P</span>
+        </div>
+        <button onclick="minimizeCall()" class="w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 text-white flex items-center justify-center transition" title="إخفاء">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+        </button>
+      </div>
+
+      <!-- PiP local -->
+      <div id="pipLocal" class="absolute bottom-24 sm:bottom-28 left-3 w-28 sm:w-36 aspect-video rounded-xl overflow-hidden border-2 border-white/20 shadow-2xl bg-black">
+        <video id="localVideoPip" autoplay playsinline muted class="w-full h-full object-cover mirror"></video>
+        <div id="pipMuteBadge" class="absolute top-1 right-1 hidden w-6 h-6 rounded-md bg-rose-500 text-white flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V4a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="px-4 pt-4 pb-6 sm:pb-8 bg-ink-900 border-t border-ink-700/60">
+      <div class="max-w-md mx-auto flex items-center justify-center gap-3 sm:gap-4">
+        <button id="muteBtn" onclick="toggleMute()" title="كتم/إلغاء كتم الصوت"
+          class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-ink-800 hover:bg-ink-700 border border-ink-700 text-white flex items-center justify-center transition active:scale-95">
+          <svg id="micOn" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+          <svg id="micOff" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 sm:w-6 sm:h-6 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" x2="22" y1="2" y2="22"/><path d="M18.89 13.23A7.12 7.12 0 0 0 19 12v-2"/><path d="M5 10v2a7 7 0 0 0 12 5"/><path d="M15 9.34V4a3 3 0 0 0-5.68-1.33"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
+        </button>
+        <button id="videoBtn" onclick="toggleVideo()" title="إيقاف/تشغيل الكاميرا"
+          class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-ink-800 hover:bg-ink-700 border border-ink-700 text-white flex items-center justify-center transition active:scale-95">
+          <svg id="camOn" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2" ry="2"/></svg>
+          <svg id="camOff" xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 sm:w-6 sm:h-6 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.66 5H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><path d="M16 16a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4h2"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+        </button>
+        <button id="swapCamCallBtn" onclick="swapCamera()" title="تبديل الكاميرا"
+          class="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-ink-800 hover:bg-ink-700 border border-ink-700 text-white flex items-center justify-center transition active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 sm:w-6 sm:h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/><path d="m21 12-7-7v4H11"/><path d="m21 12-7 7v-4h-3"/></svg>
+        </button>
+        <button onclick="endCall()" title="إنهاء المكالمة"
+          class="w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center glow-pulse-red transition active:scale-95">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92Z" transform="rotate(135 12 12)"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  /* ============================================================
+   * STATE
+   * ============================================================ */
+  let ws = null;
+  let myId = "";
+  let localStream = null;
+  let peerConnection = null;
+  let pendingOffer = null;
+  let ringtone = null;
+  let messageSound = null;
+  let pingInterval = null;
+  let reconnectTimer = null;
+  let reconnectAttempts = 0;
+  let reconnectManual = false;
+
+  let activeCall = null;            // { peerId, isVideo, startedAt, timer }
+  let isMuted = false;
+  let isVideoOff = false;
+  let videoDeviceIndex = 0;
+  let videoDevices = [];
+  let callStartTime = null;
+  let callTimerHandle = null;
+
+  let iceCandidateQueue = [];       // candidates received before remote desc
+  let hasRemoteDesc = false;
+
+  const SERVER_URL = "wss://go-broker.onrender.com/ws";
+  const ICE_SERVERS = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+    ],
+    iceCandidatePoolSize: 10,
+  };
+
+  /* ============================================================
+   * UTILITIES
+   * ============================================================ */
+  const $ = (id) => document.getElementById(id);
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  function pickAvatarClass(id) {
+    let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return ['avatar-grad-1','avatar-grad-2','avatar-grad-3','avatar-grad-4','avatar-grad-5','avatar-grad-6'][h % 6];
+  }
+  function initials(id) { return (id || '?').replace(/[^a-zA-Z0-9\u0600-\u06FF]/g, '').slice(0, 2).toUpperCase() || '?'; }
+
+  function showToast(message, kind = 'info', duration = 3500) {
+    const root = $('toastRoot');
+    const colors = {
+      info:    'bg-ink-800 border-ink-700 text-slate-100',
+      success: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200',
+      error:   'bg-rose-500/15 border-rose-500/30 text-rose-200',
+      warning: 'bg-amber-500/15 border-amber-500/30 text-amber-200',
+    };
+    const icons = {
+      info:    '<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+      success: '<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+      error:   '<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" x2="9" y1="9" y2="15"/><line x1="9" x2="15" y1="9" y2="15"/></svg>',
+      warning: '<svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg>',
+    };
+    const el = document.createElement('div');
+    el.className = `toast-in pointer-events-auto flex items-start gap-2 px-3 py-2.5 rounded-xl border shadow-lg backdrop-blur text-sm font-semibold ${colors[kind]}`;
+    el.innerHTML = `<span class="shrink-0 mt-0.5">${icons[kind]}</span><span class="leading-snug">${escapeHtml(message)}</span>`;
+    root.appendChild(el);
+    setTimeout(() => {
+      el.style.transition = 'opacity .3s, transform .3s';
+      el.style.opacity = '0';
+      el.style.transform = 'translateX(120%)';
+      setTimeout(() => el.remove(), 300);
+    }, duration);
+  }
+
+  function setStatus(state, text) {
+    // state: 'offline' | 'connecting' | 'online' | 'reconnecting' | 'error'
+    const palette = {
+      offline:     { bg: 'bg-red-500/10',    text: 'text-red-300',     border: 'border-red-500/20',    dot: 'bg-red-500' },
+      connecting:  { bg: 'bg-amber-500/10',  text: 'text-amber-300',   border: 'border-amber-500/20',  dot: 'bg-amber-400 animate-pulse' },
+      online:      { bg: 'bg-emerald-500/10',text: 'text-emerald-300', border: 'border-emerald-500/20',dot: 'bg-emerald-400' },
+      reconnecting:{ bg: 'bg-amber-500/10',  text: 'text-amber-300',   border: 'border-amber-500/20',  dot: 'bg-amber-400 animate-pulse' },
+      error:       { bg: 'bg-rose-500/10',   text: 'text-rose-300',    border: 'border-rose-500/20',   dot: 'bg-rose-500' },
+    };
+    const p = palette[state] || palette.offline;
+    [$('statusPill'), $('statusPillMobile')].forEach(el => {
+      if (!el) return;
+      el.className = `${el.className.includes('sm:hidden') ? 'sm:hidden inline-flex' : 'hidden sm:flex'} items-center gap-2 px-3 py-1.5 rounded-full ${p.bg} ${p.text} text-xs font-semibold border ${p.border}`;
+      const lbl = el.querySelector('span:last-child');
+      if (lbl) lbl.textContent = text;
+      const dot = el.querySelector('span:first-child');
+      if (dot) dot.className = `w-2 h-2 rounded-full ${p.dot}`;
+    });
+  }
+
+  function vibrate(pattern) { if (navigator.vibrate) try { navigator.vibrate(pattern); } catch(_) {} }
+
+  /* ============================================================
+   * SOUNDS
+   * ============================================================ */
+  function playRingtone() {
+    stopRingtone();
+    try {
+      ringtone = new Audio("https://cdn.jsdelivr.net/gh/balkhirihamid/public/sound/skypeoutshortver.mp3");
+      ringtone.loop = true;
+      ringtone.volume = 0.7;
+      ringtone.play().catch(() => {});
+    } catch (_) {}
+  }
+  function stopRingtone() {
+    if (ringtone) { try { ringtone.pause(); ringtone.currentTime = 0; } catch(_) {} ringtone = null; }
+  }
+  function playMessageSound() {
+    try {
+      if (!messageSound) {
+        messageSound = new Audio("https://cdn.jsdelivr.net/gh/balkhirihamid/public/sound/ding.mp3");
+        messageSound.volume = 0.4;
+      }
+      messageSound.currentTime = 0;
+      messageSound.play().catch(() => {});
+    } catch (_) {}
+  }
+
+  /* ============================================================
+   * CHAT
+   * ============================================================ */
+  function nowTime() {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  }
+
+  function appendMessage({ text, type = 'other', sender, status }) {
+    const box = $('chatBox');
+    const isMe = type === 'me';
+    const wrap = document.createElement('div');
+    wrap.className = `flex flex-col ${isMe ? 'items-start' : 'items-end'}`;
+    const bubble = document.createElement('div');
+    bubble.className = [
+      'max-w-[80%] px-3 py-2 rounded-2xl text-sm leading-relaxed break-words shadow-sm',
+      isMe ? 'bg-brand-600 text-white rounded-tr-sm' : 'bg-ink-800 text-slate-100 border border-ink-700 rounded-tl-sm',
+    ].join(' ');
+
+    if (sender) {
+      const sName = document.createElement('div');
+      sName.className = 'text-[10px] font-bold mb-0.5 ' + (isMe ? 'text-blue-100' : 'text-slate-400');
+      sName.textContent = sender;
+      bubble.appendChild(sName);
+    }
+    const body = document.createElement('div');
+    body.textContent = text;
+    bubble.appendChild(body);
+
+    const meta = document.createElement('div');
+    meta.className = 'text-[10px] mt-1 flex items-center gap-1 ' + (isMe ? 'text-blue-100/80' : 'text-slate-500');
+    meta.innerHTML = `<span>${nowTime()}</span>` + (isMe
+      ? (status === 'sent' ? '<svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '<span>…</span>')
+      : '');
+
+    bubble.appendChild(meta);
+    wrap.appendChild(bubble);
+    box.appendChild(wrap);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function appendSystem(text) {
+    const box = $('chatBox');
+    const el = document.createElement('div');
+    el.className = 'self-center text-[11px] text-slate-500 my-1';
+    el.textContent = text;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  /* ============================================================
+   * WEBSOCKET
+   * ============================================================ */
+  function connectWebSocket() {
+    const input = $('userIdInput');
+    myId = input.value.trim();
+    if (!myId) {
+      showToast('يرجى إدخال معرّفك أولاً', 'warning');
+      input.focus();
+      return;
+    }
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      showToast('أنت متصل بالفعل', 'info');
+      return;
+    }
+
+    reconnectManual = false;
+    setStatus('connecting', 'جاري الاتصال…');
+    $('loginHint') && ($('loginHint').textContent = 'جاري الاتصال…');
+
+    try {
+      ws = new WebSocket(`${SERVER_URL}?userId=${encodeURIComponent(myId)}`);
+    } catch (e) {
+      showToast('تعذّر فتح الاتصال: ' + e.message, 'error');
+      return;
+    }
+
+    ws.onopen = () => {
+      setStatus('online', 'متصل');
+      $('loginHint') && ($('loginHint').textContent = 'متصل بالسيرفر');
+      $('loginCard').classList.add('hidden');
+      $('appCard').classList.remove('hidden');
+      $('appCard').classList.add('grid');
+      $('myIdLabel').textContent = myId;
+      $('myAvatar').textContent = initials(myId);
+      $('myAvatar').className = `w-5 h-5 rounded-full ${pickAvatarClass(myId)} text-[10px] font-bold flex items-center justify-center text-white`;
+      localStorage.setItem('webrtc_uid', myId);
+
+      if (pingInterval) clearInterval(pingInterval);
+      pingInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          try { ws.send(JSON.stringify({ type: 'ping' })); } catch(_) {}
+        }
+      }, 25000);
+
+      showToast('تم الاتصال بنجاح', 'success');
+      reconnectAttempts = 0;
+    };
+
+    ws.onmessage = async (event) => {
+      let data; try { data = JSON.parse(event.data); } catch { return; }
+      if (!data || !data.type) return;
+      if (data.type === 'pong') return;
+
+      switch (data.type) {
+        case 'text':
+          appendMessage({ text: data.payload?.text || '', type: 'other', sender: data.sender });
+          if ($('chatTarget').dataset.peer === data.sender) playMessageSound();
+          break;
+
+        case 'offer':
+          handleIncomingOffer(data.sender, data.payload);
+          break;
+
+        case 'answer':
+          await handleAnswer(data.payload);
+          break;
+
+        case 'ice_candidate':
+          await handleIceCandidate(data.payload);
+          break;
+
+        case 'reject':
+          stopRingtone();
+          hideIncoming();
+          if (activeCall) {
+            showToast(`${data.sender} رفض المكالمة`, 'warning');
+            endCall(false);
+          }
+          break;
+
+        case 'hangup':
+          if (activeCall && activeCall.peerId === data.sender) {
+            showToast(`${data.sender} أنهى المكالمة`, 'info');
+            endCall(false);
+          }
+          break;
+
+        case 'ringing':
+          // server-side optional
+          break;
+
+        case 'error':
+          showToast(data.payload?.message || 'خطأ من السيرفر', 'error');
+          break;
+      }
+    };
+
+    ws.onerror = () => {
+      setStatus('error', 'خطأ في الاتصال');
+    };
+
+    ws.onclose = () => {
+      setStatus('offline', 'غير متصل');
+      if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+      if (!reconnectManual) scheduleReconnect();
+    };
+  }
+
+  function scheduleReconnect() {
+    if (reconnectManual) return;
+    if (reconnectTimer) return;
+    reconnectAttempts++;
+    const delay = Math.min(15000, 1500 * Math.pow(1.6, reconnectAttempts - 1));
+    setStatus('reconnecting', `إعادة الاتصال خلال ${Math.round(delay/1000)}ث`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      if (myId) connectWebSocket();
+    }, delay);
+  }
+
+  function disconnectWebSocket() {
+    reconnectManual = true;
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (pingInterval) { clearInterval(pingInterval); pingInterval = null; }
+    endCall(false);
+    try { ws && ws.close(); } catch(_) {}
+    ws = null;
+    setStatus('offline', 'غير متصل');
+    $('loginCard').classList.remove('hidden');
+    $('appCard').classList.add('hidden');
+    $('appCard').classList.remove('grid');
+    $('loginHint') && ($('loginHint').textContent = 'تم قطع الاتصال');
+  }
+
+  function sendSignal(type, target, payload = {}) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type, target, payload })); return true; } catch(_) {}
+    }
+    return false;
+  }
+
+  /* ============================================================
+   * TEXT MESSAGE
+   * ============================================================ */
+  function sendTextMessage() {
+    const target = $('targetIdInput').value.trim();
+    const input  = $('messageInput');
+    const text   = input.value.trim();
+    if (!target || !text) { showToast('أدخل معرّف المستلم ونص الرسالة', 'warning'); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) { showToast('غير متصل بالسيرفر', 'error'); return; }
+    if (!sendSignal('text', target, { text })) { showToast('فشل الإرسال', 'error'); return; }
+    appendMessage({ text, type: 'me', sender: 'أنا', status: 'sent' });
+    $('chatTarget').textContent = target;
+    $('chatTarget').dataset.peer = target;
+    input.value = '';
+  }
+
+  /* ============================================================
+   * MEDIA
+   * ============================================================ */
+  async function listVideoDevices() {
+    try { videoDevices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); }
+    catch { videoDevices = []; }
+  }
+
+  async function setupMedia(enableVideo, useExisting = false) {
+    if (useExisting && localStream) {
+      // Toggle video track on/off if needed
+      const vt = localStream.getVideoTracks()[0];
+      if (vt) vt.enabled = !!enableVideo;
+      isVideoOff = !enableVideo;
+      updateLocalUI();
+      return localStream;
+    }
+    try {
+      const constraints = {
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: enableVideo ? { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+      };
+      localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      isMuted = false; isVideoOff = !enableVideo;
+      updateLocalUI();
+      await listVideoDevices();
+      attachLocalStream();
+    } catch (e) {
+      showToast('فشل الوصول للكاميرا/الميكروفون: ' + e.message, 'error', 5000);
+      throw e;
+    }
+  }
+
+  function attachLocalStream() {
+    const vids = [$('localVideo'), $('localVideoPip')];
+    vids.forEach(v => { if (v) v.srcObject = localStream; });
+  }
+
+  function updateLocalUI() {
+    $('localMutedBadge').classList.toggle('hidden', !isMuted);
+    $('localVideoOffBadge').classList.toggle('hidden', !isVideoOff);
+    $('pipMuteBadge').classList.toggle('hidden', !isMuted);
+    $('muteBtn')?.classList.toggle('bg-rose-600', isMuted);
+    $('muteBtn')?.classList.toggle('border-rose-500', isMuted);
+    $('videoBtn')?.classList.toggle('bg-rose-600', isVideoOff);
+    $('videoBtn')?.classList.toggle('border-rose-500', isVideoOff);
+    $('micOn')?.classList.toggle('hidden', isMuted);
+    $('micOff')?.classList.toggle('hidden', !isMuted);
+    $('camOn')?.classList.toggle('hidden', isVideoOff);
+    $('camOff')?.classList.toggle('hidden', !isVideoOff);
+  }
+
+  async function swapCamera() {
+    if (!videoDevices.length) await listVideoDevices();
+    if (videoDevices.length < 2) { showToast('لا توجد كاميرا أخرى', 'info'); return; }
+    videoDeviceIndex = (videoDeviceIndex + 1) % videoDevices.length;
+    const deviceId = videoDevices[videoDeviceIndex].deviceId;
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: deviceId } },
+        audio: false,
+      });
+      const newTrack = newStream.getVideoTracks()[0];
+      const sender = peerConnection?.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) await sender.replaceTrack(newTrack);
+      // swap on local video element
+      const oldTrack = localStream.getVideoTracks()[0];
+      if (oldTrack) { localStream.removeTrack(oldTrack); oldTrack.stop(); }
+      localStream.addTrack(newTrack);
+      attachLocalStream();
+      showToast(`تم التبديل إلى: ${videoDevices[videoDeviceIndex].label || 'كاميرا ' + (videoDeviceIndex + 1)}`, 'info', 2000);
+    } catch (e) {
+      showToast('فشل تبديل الكاميرا: ' + e.message, 'error');
+    }
+  }
+
+  function toggleMute() {
+    if (!localStream) return;
+    isMuted = !isMuted;
+    localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+    updateLocalUI();
+  }
+  function toggleVideo() {
+    if (!localStream) return;
+    isVideoOff = !isVideoOff;
+    localStream.getVideoTracks().forEach(t => t.enabled = !isVideoOff);
+    updateLocalUI();
+  }
+
+  /* ============================================================
+   * PEER CONNECTION
+   * ============================================================ */
+  function createPeerConnection(targetId) {
+    if (peerConnection) { try { peerConnection.close(); } catch(_) {} }
+    peerConnection = new RTCPeerConnection(ICE_SERVERS);
+    hasRemoteDesc = false;
+    iceCandidateQueue = [];
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+    }
+
+    peerConnection.ontrack = (event) => {
+      const stream = event.streams[0];
+      [$('remoteVideo'), $('remoteVideoBig')].forEach(v => { if (v) v.srcObject = stream; });
+      $('remotePlaceholder')?.classList.add('hidden');
+      $('remoteStageOverlay')?.classList.add('hidden');
+    };
+
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendSignal('ice_candidate', targetId, event.candidate);
+      }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+      const s = peerConnection.connectionState;
+      $('pcState').textContent = s;
+      if (s === 'connected') {
+        startCallTimer();
+        $('callStateLabel').innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> متصل';
+      } else if (s === 'failed') {
+        showToast('فشل الاتصال — حاول مرة أخرى', 'error');
+        endCall(false);
+      } else if (s === 'disconnected') {
+        $('callStateLabel').innerHTML = '<span class="inline-block w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span> انقطع الاتصال…';
+      } else if (s === 'closed') {
+        stopCallTimer();
+      }
+    };
+
+    peerConnection.oniceconnectionstatechange = () => {
+      const s = peerConnection.iceConnectionState;
+      $('iceState').textContent = s;
+      if (s === 'connected' || s === 'completed') {
+        $('qualityBox').className = 'signal';
+        $('overlayQuality').className = 'signal';
+      } else if (s === 'checking') {
+        $('qualityBox').className = 'signal med';
+        $('overlayQuality').className = 'signal med';
+      } else if (s === 'failed' || s === 'disconnected') {
+        $('qualityBox').className = 'signal bad';
+        $('overlayQuality').className = 'signal bad';
+      }
+    };
+  }
+
+  /* ============================================================
+   * CALL FLOW
+   * ============================================================ */
+  async function startCall(video) {
+    const target = $('targetIdInput').value.trim();
+    if (!target) { showToast('أدخل معرّف الشخص الذي تريد الاتصال به', 'warning'); return; }
+    if (!ws || ws.readyState !== WebSocket.OPEN) { showToast('غير متصل بالسيرفر', 'error'); return; }
+    if (activeCall) { showToast('هناك مكالمة جارية بالفعل', 'warning'); return; }
+
+    try {
+      await setupMedia(video);
+      activeCall = { peerId: target, isVideo: video, role: 'caller' };
+      createPeerConnection(target);
+
+      // Update UI
+      $('remoteNameBig').textContent = target;
+      const av = $('remoteAvatarBig');
+      av.textContent = initials(target);
+      av.className = `w-28 h-28 rounded-full ${pickAvatarClass(target)} text-3xl font-extrabold flex items-center justify-center text-white mb-4 shadow-xl`;
+      $('callStateLabel').innerHTML = '<span class="calling-dots"><span></span><span></span><span></span></span> جاري الاتصال…';
+      $('callTimerLabel').classList.add('hidden');
+      if (video) {
+        showCallOverlay();
+      } else {
+        // Audio call still gets overlay
+        showCallOverlay();
+        $('remoteStageOverlay').classList.remove('hidden');
+        $('remoteVideoBig').srcObject = null;
+      }
+      $('chatTarget').textContent = target;
+      $('chatTarget').dataset.peer = target;
+
+      const offer = await peerConnection.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: !!video });
+      await peerConnection.setLocalDescription(offer);
+
+      if (!sendSignal('offer', target, { sdp: offer.sdp, type: offer.type, isVideo: !!video })) {
+        showToast('فشل إرسال العرض', 'error');
+        endCall(false);
+        return;
+      }
+      appendSystem(`📞 تتصل بـ ${target}…`);
+    } catch (e) {
+      showToast('فشل بدء المكالمة: ' + e.message, 'error');
+      endCall(false);
+    }
+  }
+
+  function handleIncomingOffer(senderId, payload) {
+    if (activeCall) {
+      // Busy - auto reject
+      sendSignal('reject', senderId, { reason: 'busy' });
+      showToast(`مكالمة من ${senderId} مرفوضة (مكالمة جارية)`, 'info');
+      return;
+    }
+    pendingOffer = { senderId, payload };
+    $('incomingCallerName').textContent = senderId;
+    $('incomingCallType').textContent = payload?.isVideo ? 'مكالمة فيديو واردة' : 'مكالمة صوتية واردة';
+    $('incomingCallModal').classList.remove('hidden');
+    playRingtone();
+    vibrate([300, 150, 300, 150, 300]);
+  }
+  function hideIncoming() { $('incomingCallModal').classList.add('hidden'); }
+
+  async function acceptCall() {
+    if (!pendingOffer) return;
+    stopRingtone();
+    hideIncoming();
+    const { senderId, payload } = pendingOffer;
+    pendingOffer = null;
+    activeCall = { peerId: senderId, isVideo: !!payload?.isVideo, role: 'callee' };
+
+    try {
+      await setupMedia(payload?.isVideo);
+      createPeerConnection(senderId);
+
+      $('remoteNameBig').textContent = senderId;
+      const av = $('remoteAvatarBig');
+      av.textContent = initials(senderId);
+      av.className = `w-28 h-28 rounded-full ${pickAvatarClass(senderId)} text-3xl font-extrabold flex items-center justify-center text-white mb-4 shadow-xl`;
+      $('callStateLabel').innerHTML = '<span class="calling-dots"><span></span><span></span><span></span></span> جاري الاتصال…';
+      $('callTimerLabel').classList.add('hidden');
+      $('targetIdInput').value = senderId;
+      $('chatTarget').textContent = senderId;
+      $('chatTarget').dataset.peer = senderId;
+      showCallOverlay();
+
+      await peerConnection.setRemoteDescription(new RTCSessionDescription({ sdp: payload.sdp, type: payload.type }));
+      hasRemoteDesc = true;
+      flushIceQueue();
+
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      sendSignal('answer', senderId, { sdp: answer.sdp, type: answer.type });
+      appendSystem(`✅ تم قبول المكالمة مع ${senderId}`);
+    } catch (e) {
+      showToast('فشل قبول المكالمة: ' + e.message, 'error');
+      endCall(false);
+    }
+  }
+
+  function rejectCall() {
+    stopRingtone();
+    hideIncoming();
+    if (pendingOffer) {
+      sendSignal('reject', pendingOffer.senderId, {});
+      pendingOffer = null;
+    }
+  }
+
+  async function handleAnswer(payload) {
+    if (!peerConnection) return;
+    try {
+      await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
+      hasRemoteDesc = true;
+      flushIceQueue();
+    } catch (e) {
+      console.error('handleAnswer', e);
+    }
+  }
+
+  async function handleIceCandidate(payload) {
+    if (!peerConnection) return;
+    if (!hasRemoteDesc) { iceCandidateQueue.push(payload); return; }
+    try { await peerConnection.addIceCandidate(new RTCIceCandidate(payload)); }
+    catch (e) { console.warn('addIceCandidate', e); }
+  }
+  async function flushIceQueue() {
+    const q = iceCandidateQueue.slice(); iceCandidateQueue = [];
+    for (const c of q) {
+      try { await peerConnection.addIceCandidate(new RTCIceCandidate(c)); }
+      catch (e) { console.warn('flushIce', e); }
+    }
+  }
+
+  function endCall(notifyPeer = true) {
+    stopRingtone();
+    stopCallTimer();
+    if (notifyPeer && activeCall) sendSignal('hangup', activeCall.peerId, {});
+    if (peerConnection) { try { peerConnection.close(); } catch(_) {} peerConnection = null; }
+    if (localStream) {
+      localStream.getTracks().forEach(t => { try { t.stop(); } catch(_) {} });
+      localStream = null;
+    }
+    [$('localVideo'), $('localVideoPip'), $('remoteVideo'), $('remoteVideoBig')].forEach(v => { if (v) v.srcObject = null; });
+    $('remotePlaceholder')?.classList.remove('hidden');
+    $('remoteStageOverlay')?.classList.remove('hidden');
+    $('incomingCallModal').classList.add('hidden');
+    $('callOverlay').classList.add('hidden');
+    $('iceState').textContent = '—';
+    $('pcState').textContent = '—';
+    $('qualityBox').className = 'signal';
+    $('overlayQuality').className = 'signal';
+    $('localMutedBadge').classList.add('hidden');
+    $('localVideoOffBadge').classList.add('hidden');
+    $('pipMuteBadge').classList.add('hidden');
+    isMuted = false; isVideoOff = false;
+    activeCall = null;
+    hasRemoteDesc = false; iceCandidateQueue = [];
+    appendSystem('📴 تم إنهاء المكالمة');
+  }
+
+  /* ============================================================
+   * CALL OVERLAY
+   * ============================================================ */
+  function showCallOverlay() {
+    $('callOverlay').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+  function hideCallOverlay() {
+    $('callOverlay').classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+  function minimizeCall() { hideCallOverlay(); showToast('المكالمة مستمرة في الخلفية', 'info', 1800); }
+
+  function startCallTimer() {
+    if (callTimerHandle) return;
+    callStartTime = Date.now();
+    const lbl = $('callTimerLabel');
+    lbl.classList.remove('hidden');
+    callTimerHandle = setInterval(() => {
+      const s = Math.floor((Date.now() - callStartTime) / 1000);
+      const mm = String(Math.floor(s / 60)).padStart(2, '0');
+      const ss = String(s % 60).padStart(2, '0');
+      lbl.textContent = `${mm}:${ss}`;
+    }, 1000);
+  }
+  function stopCallTimer() {
+    if (callTimerHandle) clearInterval(callTimerHandle);
+    callTimerHandle = null;
+    callStartTime = null;
+  }
+
+  /* ============================================================
+   * PICTURE-IN-PICTURE
+   * ============================================================ */
+  async function togglePip() {
+    const v = $('localVideo');
+    if (!v || !v.srcObject) return;
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else if (v.requestPictureInPicture) await v.requestPictureInPicture();
+    } catch (e) { showToast('PiP غير مدعوم', 'warning'); }
+  }
+
+  /* ============================================================
+   * TABS
+   * ============================================================ */
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('active');
+        b.classList.add('text-slate-300');
+      });
+      btn.classList.add('active');
+      btn.classList.remove('text-slate-300');
+      const tab = btn.dataset.tab;
+      document.querySelectorAll('[data-panel]').forEach(p => p.classList.add('hidden'));
+      document.querySelector(`[data-panel="${tab}"]`).classList.remove('hidden');
+    });
+  });
+
+  /* ============================================================
+   * INIT
+   * ============================================================ */
+  (function init() {
+    const saved = localStorage.getItem('webrtc_uid');
+    if (saved) $('userIdInput').value = saved;
+    $('userIdInput').addEventListener('keydown', e => { if (e.key === 'Enter') connectWebSocket(); });
+    $('targetIdInput').addEventListener('input', () => { $('chatTarget').textContent = $('targetIdInput').value.trim() || '—'; });
+
+    // Cleanup on unload
+    window.addEventListener('beforeunload', () => {
+      endCall(false);
+      try { ws && ws.close(); } catch(_) {}
+    });
+
+    // Network status
+    window.addEventListener('online', () => {
+      showToast('عُدت للـ إنترنت', 'success');
+      if (myId && (!ws || ws.readyState !== WebSocket.OPEN)) connectWebSocket();
+    });
+    window.addEventListener('offline', () => showToast('انقطع اتصال الإنترنت', 'warning'));
+
+    // Keyboard: M to mute, V for video, Esc to end
+    document.addEventListener('keydown', e => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (!activeCall) return;
+      if (e.key === 'm' || e.key === 'M') toggleMute();
+      else if (e.key === 'v' || e.key === 'V') toggleVideo();
+      else if (e.key === 'Escape') endCall();
+    });
+  })();
+  </script>
+</body>
+</html>
