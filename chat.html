@@ -1111,6 +1111,7 @@
   function endCall(notifyPeer = true) {
     stopRingtone();
     stopCallTimer();
+    hideCallOverlay();
     if (notifyPeer && activeCall) sendSignal('hangup', activeCall.peerId, {});
     if (peerConnection) { try { peerConnection.close(); } catch(_) {} peerConnection = null; }
     if (localStream) {
